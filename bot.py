@@ -1,5 +1,7 @@
+import database
 import asyncio
 import logging
+import re
 from random import randrange
 
 from aiogram import Bot, types
@@ -12,23 +14,26 @@ dp = Dispatcher(bot)
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger('broadcast')
-input_channels_entities = []
 
 
 @dp.message_handler(commands=['start'])
 async def process_start_command(message: types.Message):
-    await message.reply(f"ID чата: {message.chat.id}, MAIN_ID: {message.from_user.id}")
-    await message.reply("Привет!\nНапиши мне что-нибудь!")
+    await message.reply("Привет!\nЭто демоверсия, чтобы посмотреть доступные команды отправь /help ")
 
 
 @dp.message_handler(commands=['help'])
 async def process_help_command(message: types.Message):
-    await message.reply("Тут могло бы быть что-то полезное, но пока что этого нет.")
+    await message.reply("В этом боте на данный момент ты можешь выполнить следующие команды:\n"
+                        "/get_id - получить ID чата и пользователя\n"
+                        "/sub CHAT_ID - оформить подписку на чат с указанным ID\n"
+                        "/cancel_sub CHAT_ID - отменить подписку на чат с указанным ID\n"
+                        "/info - показать количество отслеживаемых чатов")
 
 
 @dp.message_handler(commands=['info'])
 async def process_info_command(message: types.Message):
-    await message.reply(f"Отслеживаю {len(input_channels_entities)} чатов.")
+    await message.reply(f"Всего отслеживаемых чатов: "
+                        f"{len(database.get_tg_subscriptions_by_user(message.from_user.id))}")
 
 
 async def send_message(user_id: int, text: str, disable_notification: bool = False) -> bool:
@@ -58,16 +63,59 @@ async def send_message(user_id: int, text: str, disable_notification: bool = Fal
         return True
     return False
 
+# подписка на чат
 
-@dp.message_handler(lambda message: message.chat.id != message.from_user.id)
-async def process_spam_command(message: types.Message):
-    if randrange(10) % 2 == 0:
-        await send_message(message.from_user.id, message.text)
+
+@dp.message_handler(commands=['get_id'])
+async def process_get_id_command(message: types.Message):
+    await message.reply(f"ID чата: {message.chat.id}, USER_ID: {message.from_user.id}")
+
+
+@dp.message_handler(commands=['sub'])
+async def process_subscribe_command(message: types.Message):
+    await message.reply(f"Для того, чтобы подписаться на обновления беседы, пригласите в нее бота, "
+                        f"если он еще в ней не состоит. Далее сюда нужно будет прислать ID чата, "
+                        f"который вы хотите отслеживать. "
+                        f"Узнать его можно написав в нужной беседе команду /get_id ;)")
+    input_id = re.split(' ', message.text, maxsplit=3)
+    try:
+        input_id = int(input_id[1])
+    except ValueError:
+        return await message.reply(f"Вы неверно ввели ID. Попробуйте еще раз :)")
+
+    # check if suitable
+    database.create_tg_subscription(message.from_user.id, input_id)
+    await message.reply(f"Вы успешно подписались на чат со следующим ID: {input_id}")
+
+
+@dp.message_handler(commands=['cancel_sub'])
+async def process_cancel_subscription_command(message: types.Message):
+    await message.reply(f"Для того, чтобы отписаться от обновлений чата, пришлите сюда ID чата "
+                        f"за которым вы не хотите больше следить. "
+                        f"Узнать его можно написав в нужной беседе команду /get_id ;)")
+    input_id = re.split(' ', message.text, maxsplit=3)
+    try:
+        input_id = int(input_id[1])
+    except ValueError:
+        return await message.reply(f"Вы неверно ввели ID. Попробуйте еще раз :)")
+
+    # check if suitable
+    database.remove_tg_subscription(message.from_user.id, input_id)
+    await message.reply(f"Вы успешно отписались от чата со следующим ID: {input_id}")
+
+
+@dp.message_handler(lambda message: len(database.get_tg_subscriptions_by_chat(message.chat.id)))
+async def process_forward_command(message: types.Message):
+    subscriptions = database.get_tg_subscriptions_by_chat(message.chat.id)
+    print(subscriptions)
+    if randrange(10) % 3 == 0:
+        for user in subscriptions:
+            await send_message(user.user_id, message.text)
 
 
 @dp.message_handler(commands=['try'])
 async def process_spam_command(message: types.Message):
-    await send_message(message.from_user.id, 'что-то делаю')
+    await send_message(message.from_user.id, 'for testing')
 
 
 if __name__ == '__main__':
